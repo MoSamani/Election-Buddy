@@ -5,3 +5,6 @@ psycopg2-binary
 pydantic>=2.0
 python-dotenv
 qdrant-client
+sentence-transformers
+requests
+openai
