@@ -85,6 +85,8 @@ class SearchResponse(BaseModel):
 class RagAnswerRequest(BaseModel):
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
+    peer_reviewed_only: bool = False
+    conversation_id: Optional[int] = None
 
 
 class RagSource(BaseModel):
@@ -100,3 +102,32 @@ class RagAnswerResponse(BaseModel):
     question: str
     answer: str
     sources: List[RagSource]
+    conversation_id: Optional[int] = None
+
+class ChatMessageItem(BaseModel):
+    id: int
+    role: str
+    content: str
+    sources: Optional[List[dict]] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class ChatSessionListItem(BaseModel):
+    id: int
+    title: Optional[str]
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class ChatSessionDetail(BaseModel):
+    id: int
+    title: Optional[str]
+    messages: List[ChatMessageItem]
+
+    class Config:
+        orm_mode = True

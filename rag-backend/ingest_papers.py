@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 from qdrant_client.models import VectorParams, Distance
-
+from demo_papers import DEMO_PAPERS
 
 # ===== Konfiguration =====
 
@@ -18,44 +18,6 @@ QDRANT_COLLECTION = "documents"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 
 
-# ===== Demo-Papers (später ersetzt du das durch echte Daten) =====
-
-DEMO_PAPERS: List[Dict[str, Any]] = [
-    {
-        "external_id": "doi:10.1038/s41586-020-2008-3",
-        "title": "Safety and efficacy of the mRNA vaccine against SARS-CoV-2",
-        "text": (
-            "Hintergrund: mRNA-basierte Impfstoffe wurden in Phase-3-Studien "
-            "zur Prävention von COVID-19 getestet. Die Studie untersuchte Wirksamkeit "
-            "und Sicherheit bei unterschiedlichen Altersgruppen, mit besonderem Fokus "
-            "auf schwere Verläufe und Nebenwirkungsprofile..."
-        ),
-        "meta": {
-            "doi": "10.1038/s41586-020-2008-3",
-            "authors": ["Muster, A.", "Beispiel, B."],
-            "year": 2020,
-            "journal": "Nature",
-            "peer_reviewed": True,
-            "topics": ["COVID-19", "Impfstoff", "mRNA"],
-        },
-    },
-    {
-        "external_id": "arxiv:2301.01234",
-        "title": "Retrieval-Augmented Generation for Science Journalism",
-        "text": (
-            "In dieser Arbeit untersuchen wir, wie Retrieval-Augmented Generation (RAG) "
-            "für wissenschaftlichen Journalismus eingesetzt werden kann. Wir kombinieren "
-            "semantische Vektorsuche mit kuratierten Wissensbasen, um die Zuverlässigkeit "
-            "von Antworten zu erhöhen und Halluzinationen zu reduzieren..."
-        ),
-        "meta": {
-            "source": "arXiv",
-            "year": 2023,
-            "peer_reviewed": False,
-            "topics": ["RAG", "LLM", "Journalismus"],
-        },
-    },
-]
 
 
 # ===== Hilfsfunktionen =====

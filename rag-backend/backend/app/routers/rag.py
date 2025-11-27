@@ -139,8 +139,6 @@ def build_user_prompt(question: str, contexts: List[schemas.SearchResult]) -> st
         "Formuliere eine Antwort auf die Frage, die sich eng an die Kontexte hält. "
         "Weise auf Unsicherheiten hin, falls die Evidenzlage unklar ist.\n"
     )
-
-
 @router.post("/", response_model=schemas.RagAnswerResponse)
 def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db)):
     if not settings.openai_api_key:
@@ -148,33 +146,78 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
 
     client = OpenAI(api_key=settings.openai_api_key)
 
+    # 0) ChatSession holen oder neu anlegen
+    conv_id = payload.conversation_id
+    session_obj: models.ChatSession | None = None
+
+    if conv_id is not None:
+        session_obj = (
+            db.query(models.ChatSession)
+            .filter(models.ChatSession.id == conv_id)
+            .first()
+        )
+
+    if session_obj is None:
+        session_obj = models.ChatSession(
+            title=payload.question[:180],
+        )
+        db.add(session_obj)
+        db.commit()
+        db.refresh(session_obj)
+
     # 1) Retrieval
     contexts = retrieve_context(
-        question=payload.question,
-        top_k=payload.top_k,
-        db=db,
-        peer_reviewed_only=getattr(payload, "peer_reviewed_only", False),
+        payload.question,
+        payload.top_k,
+        db,
+        # falls du peer_reviewed_only im retrieve_context schon eingebaut hast:
+        # peer_reviewed_only=payload.peer_reviewed_only,
     )
 
-    # 1a) Filter nach Score (z.B. >= 0.5)
     score_threshold = 0.5
     filtered_contexts = [c for c in contexts if c.score >= score_threshold]
 
-    # Fallback: wenn nichts den Threshold schafft, nimm einfach den besten
     if not filtered_contexts and contexts:
         filtered_contexts = [contexts[0]]
 
-    # 2) Prompt bauen mit filtered_contexts
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(payload.question, filtered_contexts)
 
-    # 3) LLM Call
+    # 🔹 1b) Bisherigen Chat-Verlauf laden (ohne aktuelle Frage)
+    # wir nehmen z.B. die letzten 8 Messages (4 User + 4 Assistant, je nach Verlauf)
+    history_messages = (
+        db.query(models.ChatMessage)
+        .filter(models.ChatMessage.session_id == session_obj.id)
+        .order_by(models.ChatMessage.created_at.asc())
+        .all()
+    )
+
+    # nur die letzten N nehmen, damit der Prompt nicht explodiert
+    MAX_HISTORY_MSGS = 4
+    history_messages = history_messages[-MAX_HISTORY_MSGS:]
+
+    # in OpenAI-Format bringen
+    history_for_llm = []
+    for m in history_messages:
+        role = "assistant" if m.role == "assistant" else "user"
+        history_for_llm.append(
+            {
+                "role": role,
+                "content": m.content,
+            }
+        )
+
+    # 3) LLM Call mit Verlauf + aktuellem RAG-Prompt
     try:
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                *history_for_llm,
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
             ],
             temperature=0.2,
         )
@@ -182,7 +225,7 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
 
-    # 4) Sources ebenfalls nur aus filtered_contexts bauen
+    # 4) Sources aus filtered_contexts bauen
     sources = [
         schemas.RagSource(
             document_id=ctx.document_id,
@@ -195,8 +238,28 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
         for ctx in filtered_contexts
     ]
 
+    # 5) Messages speichern
+    user_msg = models.ChatMessage(
+        session_id=session_obj.id,
+        role="user",
+        content=payload.question,
+        sources=None,
+    )
+    db.add(user_msg)
+
+    assistant_msg = models.ChatMessage(
+        session_id=session_obj.id,
+        role="assistant",
+        content=answer_text,
+        sources=[s.model_dump() for s in sources],
+    )
+    db.add(assistant_msg)
+
+    db.commit()
+
     return schemas.RagAnswerResponse(
         question=payload.question,
         answer=answer_text,
         sources=sources,
+        conversation_id=session_obj.id,
     )

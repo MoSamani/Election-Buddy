@@ -9,6 +9,7 @@ from .routers import query as query_router
 from .routers import feedback as feedback_router
 from .routers import documents as documents_router
 from .routers import rag as rag_router
+from .routers import chat
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -70,3 +71,4 @@ app.include_router(feedback_router.router)
 app.include_router(documents_router.router)  
 app.include_router(search_router.router)
 app.include_router(rag_router.router) 
+app.include_router(chat.router) 
