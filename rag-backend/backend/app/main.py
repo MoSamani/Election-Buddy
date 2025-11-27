@@ -10,6 +10,8 @@ from .routers import feedback as feedback_router
 from .routers import documents as documents_router
 from .routers import rag as rag_router
 
+from fastapi.middleware.cors import CORSMiddleware
+
 def init_db():
     # Für den Anfang einfach: Tabellen bei Start erstellen
     Base.metadata.create_all(bind=engine)
@@ -31,6 +33,14 @@ def init_qdrant():
 app = FastAPI(
     title="RAG Backend – Wissenschaftsjournalismus",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Init bei Startup
