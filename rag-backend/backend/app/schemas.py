@@ -91,6 +91,7 @@ class RagSource(BaseModel):
     document_id: int
     chunk_index: int
     title: str
+    chunk_text: str
     meta: Optional[dict] = None
     score: float
 

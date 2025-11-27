@@ -5,6 +5,7 @@ import requests
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
+from qdrant_client.models import VectorParams, Distance
 
 
 # ===== Konfiguration =====
@@ -130,30 +131,52 @@ def fetch_document_by_external_id(external_id: str) -> Dict[str, Any]:
             return d
     raise RuntimeError(f"Document mit external_id={external_id} nicht gefunden")
 
-
 def upsert_chunks_to_qdrant(
     qdrant: QdrantClient,
     model: SentenceTransformer,
     doc: dict,
-    chunks: list[str],
+    chunks: List[str],
 ):
     if not chunks:
         print(f"[Warn] Dokument {doc['id']} hat keinen Text / keine Chunks.")
         return
 
-    vectors = model.encode(chunks).tolist()
+    # 1) Embeddings berechnen
+    vectors = model.encode(chunks).tolist()  # -> List[List[float]]
 
-    points: list[PointStruct] = []
+    points: List[PointStruct] = []
+
+    # 🔹 Meta aus dem Backend-Dokument holen
+    meta = doc.get("meta", {}) or {}
+
+    # 🔹 Peer-Review-Flag bestimmen
+    #  - Demo-Papers haben meta["peer_reviewed"] bereits
+    #  - Fallback: False, falls nicht gesetzt
+    is_peer_reviewed = meta.get("peer_reviewed")
+    if is_peer_reviewed is None:
+        source = (meta.get("source") or "").lower()
+        journal = (meta.get("journal") or "").lower()
+
+        if "arxiv" in source:
+            is_peer_reviewed = False
+        elif journal:  # hat ein Journal → eher peer-reviewed
+            is_peer_reviewed = True
+        else:
+            is_peer_reviewed = False  # konservativ
+    is_peer_reviewed = bool(is_peer_reviewed)
+
     for idx, (chunk_text, vector) in enumerate(zip(chunks, vectors)):
-        # IDs als Integer, nicht als "1-0"
+        # Eindeutige numerische ID: doc_id * 10000 + chunk_index
         point_id = doc["id"] * 10000 + idx
 
         payload = {
             "document_id": doc["id"],
             "chunk_index": idx,
             "title": doc["title"],
-            "meta": doc.get("meta", {}),
+            "meta": meta,
             "chunk_text": chunk_text,
+            # 🔹 Top-Level Flag für Qdrant-Filter
+            "is_peer_reviewed": is_peer_reviewed,
         }
 
         points.append(
@@ -164,12 +187,16 @@ def upsert_chunks_to_qdrant(
             )
         )
 
+    # 2) Alle Punkte in einem Rutsch upserten
     qdrant.upsert(
         collection_name=QDRANT_COLLECTION,
         points=points,
     )
-    print(f"[OK] {len(points)} Chunks für doc_id={doc['id']} in Qdrant gespeichert.")
 
+    print(
+        f"[OK] {len(points)} Chunks für doc_id={doc['id']} "
+        f"(peer_reviewed={is_peer_reviewed}) in Qdrant gespeichert."
+    )
 
 
 def main():
@@ -180,6 +207,12 @@ def main():
     # 2. Qdrant-Client initialisieren
     print(f"[Init] Verbinde mit Qdrant: {QDRANT_URL}")
     qdrant = QdrantClient(url=QDRANT_URL)
+
+    if not qdrant.collection_exists(QDRANT_COLLECTION):
+        qdrant.create_collection(
+        collection_name=QDRANT_COLLECTION,
+        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+    )
 
     # 3. Papers durchgehen
     for paper in DEMO_PAPERS:

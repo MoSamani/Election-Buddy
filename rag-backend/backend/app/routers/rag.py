@@ -13,14 +13,20 @@ import requests
 router = APIRouter(prefix="/rag_answer", tags=["rag"])
 
 
-
-def retrieve_context(question: str, top_k: int, db: Session) -> List[schemas.SearchResult]:
+def retrieve_context(
+    question: str,
+    top_k: int,
+    db: Session,
+    peer_reviewed_only: bool = False,
+) -> List[schemas.SearchResult]:
     """
     Nutzt dieselbe Logik wie /search:
     - Query embedden
     - Qdrant REST-API callen
     - Dokumente aus Postgres holen
     - SearchResult-Liste zurückgeben
+
+    Wenn peer_reviewed_only=True, werden nur Punkte mit payload.is_peer_reviewed == True berücksichtigt.
     """
     from ..schemas import SearchResult  # reuse
 
@@ -29,11 +35,25 @@ def retrieve_context(question: str, top_k: int, db: Session) -> List[schemas.Sea
 
     # 2) Qdrant search
     qdrant_search_url = f"{settings.qdrant_url}/collections/{settings.qdrant_collection}/points/search"
-    resp = requests.post(
-        qdrant_search_url,
-        json={"vector": query_vector, "limit": top_k, "with_payload": True},
-        timeout=10,
-    )
+
+    body = {
+        "vector": query_vector,
+        "limit": top_k,
+        "with_payload": True,
+    }
+
+    # 🔹 Filter nach peer-reviewed Quellen (bool-Feld im Payload)
+    if peer_reviewed_only:
+        body["filter"] = {
+            "must": [
+                {
+                    "key": "is_peer_reviewed",
+                    "match": {"value": True},
+                }
+            ]
+        }
+
+    resp = requests.post(qdrant_search_url, json=body, timeout=10)
     if resp.status_code != 200:
         raise HTTPException(
             status_code=500,
@@ -45,6 +65,7 @@ def retrieve_context(question: str, top_k: int, db: Session) -> List[schemas.Sea
     if not hits:
         return []
 
+    # Dokument-IDs aus Payload einsammeln
     doc_ids = {
         (hit.get("payload") or {}).get("document_id")
         for hit in hits
@@ -128,7 +149,12 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
     client = OpenAI(api_key=settings.openai_api_key)
 
     # 1) Retrieval
-    contexts = retrieve_context(payload.question, payload.top_k, db)
+    contexts = retrieve_context(
+        question=payload.question,
+        top_k=payload.top_k,
+        db=db,
+        peer_reviewed_only=getattr(payload, "peer_reviewed_only", False),
+    )
 
     # 1a) Filter nach Score (z.B. >= 0.5)
     score_threshold = 0.5
@@ -162,6 +188,7 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
             document_id=ctx.document_id,
             chunk_index=ctx.chunk_index,
             title=ctx.title,
+            chunk_text=ctx.chunk_text,
             meta=ctx.meta,
             score=ctx.score,
         )
