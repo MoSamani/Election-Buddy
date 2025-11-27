@@ -32,9 +32,10 @@ services:
       - db
       - qdrant
     environment:
-      DATABASE_URL: postgresql+psycopg2://rag_user:rag_pass@db:5432/rag_db
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_COLLECTION: documents
+      - DATABASE_URL=${DATABASE_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
       - "8000:8000"
 

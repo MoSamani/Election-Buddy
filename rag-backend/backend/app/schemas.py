@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
-
+from typing import List
 
 # Query
 
@@ -61,3 +61,41 @@ class DocumentRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
+
+
+class SearchResult(BaseModel):
+    document_id: int
+    chunk_index: int
+    score: float
+    title: str
+    chunk_text: str
+    meta: Optional[dict] = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult]
+
+class RagAnswerRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=10)
+
+
+class RagSource(BaseModel):
+    document_id: int
+    chunk_index: int
+    title: str
+    meta: Optional[dict] = None
+    score: float
+
+
+class RagAnswerResponse(BaseModel):
+    question: str
+    answer: str
+    sources: List[RagSource]

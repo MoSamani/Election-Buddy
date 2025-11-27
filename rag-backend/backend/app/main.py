@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
+from .routers import search as search_router
 
 from .config import settings
 from .db import Base, engine
 from .routers import query as query_router
 from .routers import feedback as feedback_router
 from .routers import documents as documents_router
+from .routers import rag as rag_router
 
 def init_db():
     # Für den Anfang einfach: Tabellen bei Start erstellen
@@ -51,3 +53,5 @@ def health():
 app.include_router(query_router.router)
 app.include_router(feedback_router.router)
 app.include_router(documents_router.router)  
+app.include_router(search_router.router)
+app.include_router(rag_router.router) 
