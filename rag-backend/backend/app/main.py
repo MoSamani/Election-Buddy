@@ -12,6 +12,11 @@ from .routers import rag as rag_router
 
 from fastapi.middleware.cors import CORSMiddleware
 
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 def init_db():
     # Für den Anfang einfach: Tabellen bei Start erstellen
     Base.metadata.create_all(bind=engine)
@@ -37,7 +42,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

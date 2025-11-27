@@ -25,7 +25,7 @@ services:
       - qdrant_storage:/qdrant/storage
 
   backend:
-    build: ./backend
+    build: ./rag-backend/backend
     container_name: rag_backend
     restart: unless-stopped
     depends_on:
@@ -38,6 +38,28 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     ports:
       - "8000:8000"
+    volumes:
+      - ./rag-backend/backend/app:/app/app
+    working_dir: /app
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+  frontend:
+    image: node:20
+    container_name: rag_frontend
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
+    volumes:
+      - ./rag-frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
