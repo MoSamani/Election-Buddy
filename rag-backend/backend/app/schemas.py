@@ -1,8 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field
-from typing import List
 
 # Query
 
@@ -88,6 +87,9 @@ class RagAnswerRequest(BaseModel):
     peer_reviewed_only: bool = False
     conversation_id: Optional[int] = None
     relevant_document_ids: Optional[List[int]] = None
+    # 🔹 NEU: optionaler Gold-Answer für LLM-Judge (für Eval-Mode)
+    reference_answer: Optional[str] = None
+    run_judge: bool = False  # Toggle, ob LLM-Judge laufen soll
 
 
 class RagSource(BaseModel):
@@ -105,6 +107,13 @@ class RagAnswerResponse(BaseModel):
     sources: List[RagSource]
     conversation_id: Optional[int] = None
     precision_at_k: Optional[float] = None
+        # 🔹 NEU: Ergebnis vom LLM-Judge
+    judge_score: Optional[float] = None     # z.B. 0–1
+    judge_label: Optional[str] = None       # z.B. "korrekt", "teilweise korrekt", "falsch"
+    judge_explanation: Optional[str] = None # kurze Begründung
+
+    class Config:
+        from_attributes = True
 
 class ChatMessageItem(BaseModel):
     id: int

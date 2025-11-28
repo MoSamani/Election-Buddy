@@ -12,6 +12,84 @@ import requests
 
 router = APIRouter(prefix="/rag_answer", tags=["rag"])
 
+def run_llm_judge(
+    client: OpenAI,
+    question: str,
+    answer: str,
+    reference_answer: str | None,
+    contexts: list[schemas.SearchResult],
+) -> tuple[float | None, str | None, str | None]:
+    """
+    Nutzt ein LLM als Judge, ähnlich wie in eval_rag.py.
+    Gibt (score, label, explanation) zurück.
+    score: 0–1 (1 = vollständig korrekt)
+    """
+    # Kontext kompakt zusammenbauen (optional)
+    ctx_snippets = []
+    for i, c in enumerate(contexts[:5]):
+        ctx_snippets.append(
+            f"[Kontext {i+1}] Titel: {c.title}\nTextauszug: {c.chunk_text[:400]}"
+        )
+    ctx_block = "\n\n".join(ctx_snippets) if ctx_snippets else "Keine Kontexte."
+
+    # Wenn du in eval_rag.py schon einen Prompt hast, kannst du den hier verwenden.
+    # Beispiel-Prompt:
+    user_parts = [
+        f"Frage:\n{question}",
+        f"System-Antwort:\n{answer}",
+        f"Kontexte (aus Retrieval):\n{ctx_block}",
+    ]
+    if reference_answer:
+        user_parts.append(f"Referenz-Antwort (Gold):\n{reference_answer}")
+
+    user_prompt = "\n\n".join(user_parts) + """
+
+Bewerte die System-Antwort nach den folgenden Kriterien:
+1. Faktische Korrektheit bezogen auf die Kontexte (und falls vorhanden die Referenz-Antwort)
+2. Ob die Antwort bei Unsicherheit korrekt einschränkt statt zu halluzinieren
+3. Ob zentrale Punkte der Referenz-Antwort abgedeckt wurden (falls vorhanden)
+
+Gib deine Antwort im JSON-Format zurück, ohne weiteren Text, z. B.:
+
+{
+  "score": 0.85,
+  "label": "teilweise korrekt",
+  "explanation": "Begründung..."
+}
+"""
+
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Du bist ein strenger, aber fairer wissenschaftlicher Gutachter. "
+                        "Du bewertest nur den Wahrheitsgehalt und die Abdeckung der Antwort."
+                    ),
+                },
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+        )
+        raw = completion.choices[0].message.content or ""
+    except Exception as e:
+        print("LLM-Judge failed:", e)
+        return None, None, None
+
+    # Sehr einfache JSON-Parsing-Logik – in echt evtl. robustere Variante
+    import json
+
+    try:
+        data = json.loads(raw)
+        score = float(data.get("score")) if "score" in data else None
+        label = data.get("label")
+        explanation = data.get("explanation")
+        return score, label, explanation
+    except Exception as e:
+        print("Parsing LLM-Judge-Output failed:", e, "raw:", raw)
+        return None, None, raw[:500]  # im Zweifel Rohtext als "explanation"
 
 def retrieve_context(
     question: str,
@@ -244,6 +322,19 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
 
+    # 🔹 3b) Optional: LLM-Judge ausführen
+    judge_score = None
+    judge_label = None
+    judge_explanation = None
+    if payload.run_judge:
+        judge_score, judge_label, judge_explanation = run_llm_judge(
+            client=client,
+            question=payload.question,
+            answer=answer_text,
+            reference_answer=payload.reference_answer,
+            contexts=filtered_contexts,
+        )
+
     # 4) Sources aus filtered_contexts bauen
     sources = [
         schemas.RagSource(
@@ -282,4 +373,7 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
         sources=sources,
         conversation_id=session_obj.id,
         precision_at_k=precision_at_k,
+        judge_score=judge_score,
+        judge_label=judge_label,
+        judge_explanation=judge_explanation,
     )

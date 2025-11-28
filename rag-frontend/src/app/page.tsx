@@ -31,6 +31,9 @@ type RagAnswerResponse = {
   sources: RagSource[]
   conversation_id: number
   precision_at_k?: number | null
+  judge_score?: number | null
+  judge_label?: string | null
+  judge_explanation?: string | null
 }
 
 type ChatMessage = {
@@ -39,6 +42,9 @@ type ChatMessage = {
   content: string
   sources?: RagSource[]
   precision_at_k?: number | null
+  judge_score?: number | null
+  judge_label?: string | null
+  judge_explanation?: string | null
 }
 
 type ChatSessionItem = {
@@ -60,6 +66,8 @@ export default function HomePage() {
   const [sessions, setSessions] = useState<ChatSessionItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
   const [evalRelevantDocs, setEvalRelevantDocs] = useState<string>('')
+  const [evalReferenceAnswer, setEvalReferenceAnswer] = useState<string>('')
+  const [runJudge, setRunJudge] = useState<boolean>(false)
 
   // 🔹 Peer-reviewed only
   const [peerReviewedOnly, setPeerReviewedOnly] = useState<boolean>(false)
@@ -147,7 +155,9 @@ export default function HomePage() {
         top_k: topK,
         peer_reviewed_only: peerReviewedOnly,
         conversation_id: conversationId,
-        relevant_document_ids, // 👈 Precision@k
+        relevant_document_ids,
+        run_judge: runJudge,
+        reference_answer: evalReferenceAnswer || null,
       }
       console.log('DEBUG Request-Body:', body)
 
@@ -173,6 +183,9 @@ export default function HomePage() {
         content: data.answer,
         sources: data.sources,
         precision_at_k: data.precision_at_k ?? null,
+        judge_score: data.judge_score ?? null,
+        judge_label: data.judge_label ?? null,
+        judge_explanation: data.judge_explanation ?? null,
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -356,6 +369,33 @@ export default function HomePage() {
                 </span>
               </div>
 
+              {/* LLM-Judge Toggle + Referenz-Antwort */}
+              <div className="flex flex-col gap-1 text-xs text-slate-300 border-t border-slate-800 pt-2 mt-1">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="run-judge"
+                    checked={runJudge}
+                    onCheckedChange={setRunJudge}
+                  />
+                  <Label
+                    htmlFor="run-judge"
+                    className="cursor-pointer text-slate-200"
+                  >
+                    LLM-Judge ausführen (Antwort bewerten)
+                  </Label>
+                </div>
+                <textarea
+                  value={evalReferenceAnswer}
+                  onChange={(e) => setEvalReferenceAnswer(e.target.value)}
+                  placeholder="Optionale Referenz-Antwort (Gold-Standard) für die Bewertung..."
+                  className="mt-1 h-16 w-full rounded-md bg-slate-900/60 border border-slate-700 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500"
+                />
+                <span className="text-[10px] text-slate-500">
+                  Wenn gesetzt, vergleicht der LLM-Judge die System-Antwort mit
+                  dieser Referenz.
+                </span>
+              </div>
+
               {/* Top-k Slider */}
               <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
                 <span className="whitespace-nowrap">
@@ -478,6 +518,34 @@ function ChatBubble({
                 {message.precision_at_k.toFixed(2)}
               </span>
             </span>
+          </div>
+        )}
+
+        {/* LLM-Judge Result */}
+        {!isUser && (message.judge_score != null || message.judge_label) && (
+          <div className="mt-1 rounded-md bg-slate-900/70 border border-slate-700 px-3 py-2 text-[11px] space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-100">LLM-Judge</span>
+              {message.judge_score != null && (
+                <span className="rounded-full bg-slate-700/80 px-2 py-[1px]">
+                  Score:{' '}
+                  <span className="font-semibold">
+                    {message.judge_score.toFixed(2)}
+                  </span>
+                </span>
+              )}
+            </div>
+            {message.judge_label && (
+              <p className="text-slate-200">
+                Urteil:{' '}
+                <span className="font-medium">{message.judge_label}</span>
+              </p>
+            )}
+            {message.judge_explanation && (
+              <p className="text-slate-300 whitespace-pre-wrap">
+                {message.judge_explanation}
+              </p>
+            )}
           </div>
         )}
 
