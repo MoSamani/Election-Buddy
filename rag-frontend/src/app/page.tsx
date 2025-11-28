@@ -30,6 +30,7 @@ type RagAnswerResponse = {
   answer: string
   sources: RagSource[]
   conversation_id: number
+  precision_at_k?: number | null
 }
 
 type ChatMessage = {
@@ -37,6 +38,7 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   sources?: RagSource[]
+  precision_at_k?: number | null
 }
 
 type ChatSessionItem = {
@@ -55,9 +57,9 @@ export default function HomePage() {
   const [selectedSource, setSelectedSource] = useState<RagSource | null>(null)
   const [topK, setTopK] = useState<number>(3)
   const [conversationId, setConversationId] = useState<number | null>(null)
-
   const [sessions, setSessions] = useState<ChatSessionItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
+  const [evalRelevantDocs, setEvalRelevantDocs] = useState<string>('')
 
   // 🔹 Peer-reviewed only
   const [peerReviewedOnly, setPeerReviewedOnly] = useState<boolean>(false)
@@ -113,6 +115,7 @@ export default function HomePage() {
     if (!input.trim() || loading) return
 
     const question = input.trim()
+
     setInput('')
     setError(null)
 
@@ -123,19 +126,35 @@ export default function HomePage() {
     }
     setMessages((prev) => [...prev, userMessage])
 
+    // 🔹 relevante Dokument-IDs (Precision@k)
+    let relevant_document_ids: number[] | undefined = undefined
+    if (evalRelevantDocs.trim()) {
+      const parsed = evalRelevantDocs
+        .split(',')
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => !Number.isNaN(n))
+      if (parsed.length > 0) {
+        relevant_document_ids = parsed
+      }
+    }
+
+    console.log('DEBUG relevant_document_ids vor fetch:', relevant_document_ids)
+
     setLoading(true)
     try {
+      const body = {
+        question,
+        top_k: topK,
+        peer_reviewed_only: peerReviewedOnly,
+        conversation_id: conversationId,
+        relevant_document_ids, // 👈 Precision@k
+      }
+      console.log('DEBUG Request-Body:', body)
+
       const res = await fetch(`${API_BASE}/rag_answer/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question,
-          top_k: topK,
-          peer_reviewed_only: peerReviewedOnly,
-          conversation_id: conversationId,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
 
       if (!res.ok) {
@@ -144,20 +163,19 @@ export default function HomePage() {
       }
 
       const data: RagAnswerResponse = await res.json()
+      console.log('DEBUG Response von /rag_answer:', data)
+
       setConversationId(data.conversation_id)
-      setActiveSessionId(data.conversation_id)
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: data.answer,
         sources: data.sources,
+        precision_at_k: data.precision_at_k ?? null,
       }
 
       setMessages((prev) => [...prev, assistantMessage])
-
-      // nach jeder Antwort Sessions-Liste aktualisieren
-      refreshSessions()
     } catch (err: any) {
       console.error(err)
       setError(err.message ?? 'Fehler beim Abrufen der Antwort')
@@ -321,6 +339,23 @@ export default function HomePage() {
                 </span>
               </div>
 
+              {/* 🔹 Precision@k: Relevante Dokument-IDs */}
+              <div className="flex flex-col gap-1 text-xs text-slate-300">
+                <label className="text-[11px] text-slate-400">
+                  Relevante Dokument-IDs (für Precision@k, optional)
+                </label>
+                <Input
+                  value={evalRelevantDocs}
+                  onChange={(e) => setEvalRelevantDocs(e.target.value)}
+                  placeholder="z. B. 1, 5, 12"
+                  className="bg-slate-900/60 border-slate-700 text-slate-100 placeholder:text-slate-500 h-8 text-xs"
+                />
+                <span className="text-[10px] text-slate-500">
+                  Wenn gesetzt, berechnet das Backend Precision@k basierend auf
+                  den Top-k-Retrievals.
+                </span>
+              </div>
+
               {/* Top-k Slider */}
               <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
                 <span className="whitespace-nowrap">
@@ -429,10 +464,24 @@ function ChatBubble({
             : 'bg-slate-800 text-slate-100 border border-slate-700'
         }`}
       >
+        {/* User/Assistant Text */}
         <div className="whitespace-pre-wrap leading-relaxed">
           {message.content}
         </div>
 
+        {/* Precision@k Badge (nur bei Assistant) */}
+        {!isUser && message.precision_at_k != null && (
+          <div className="pt-1">
+            <span className="inline-flex items-center rounded-full bg-slate-700/70 px-2 py-[2px] text-[11px] text-slate-100">
+              Precision@k:{' '}
+              <span className="font-semibold">
+                {message.precision_at_k.toFixed(2)}
+              </span>
+            </span>
+          </div>
+        )}
+
+        {/* Quellenliste */}
         {!isUser && message.sources && message.sources.length > 0 && (
           <div className="pt-2 border-t border-slate-700/60 space-y-1">
             <p className="text-[10px] uppercase tracking-wide text-slate-400">
@@ -442,14 +491,16 @@ function ChatBubble({
               {message.sources.map((s) => {
                 const year =
                   s.meta?.year ?? s.meta?.Year ?? s.meta?.YEAR ?? 'unbekannt'
+
                 const journal =
                   s.meta?.journal ??
                   s.meta?.source ??
                   s.meta?.Journal ??
                   'Quelle unbekannt'
+
                 const peerReviewed =
                   s.meta?.peer_reviewed === true ||
-                  s.meta?.peerReviewed === true
+                  (s.meta as any)?.peerReviewed === true
 
                 return (
                   <li

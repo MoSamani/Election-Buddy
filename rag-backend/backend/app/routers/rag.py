@@ -174,12 +174,31 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
         # peer_reviewed_only=payload.peer_reviewed_only,
     )
 
-    score_threshold = 0.5
+    score_threshold = 0.4
     filtered_contexts = [c for c in contexts if c.score >= score_threshold]
 
     if not filtered_contexts and contexts:
         filtered_contexts = [contexts[0]]
 
+        # 🔹 Precision@k für Retrieval berechnen (optional, wenn Ground-Truth vorhanden)
+    precision_at_k: float | None = None
+    if payload.relevant_document_ids:
+        relevant_ids = set(payload.relevant_document_ids)
+        retrieved_ids = [c.document_id for c in contexts]  # alle Top-k-Retrievals, noch ungefiltert
+
+        k = len(retrieved_ids)
+        if k > 0:
+            hits = sum(1 for doc_id in retrieved_ids if doc_id in relevant_ids)
+            precision_at_k = hits / k
+
+        print(
+            "DEBUG precision_at_k:",
+            precision_at_k,
+            "relevant:",
+            relevant_ids,
+            "retrieved:",
+            retrieved_ids,
+        )
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(payload.question, filtered_contexts)
 
@@ -262,4 +281,5 @@ def rag_answer(payload: schemas.RagAnswerRequest, db: Session = Depends(get_db))
         answer=answer_text,
         sources=sources,
         conversation_id=session_obj.id,
+        precision_at_k=precision_at_k,
     )
