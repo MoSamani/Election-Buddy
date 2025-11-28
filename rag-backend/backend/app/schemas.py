@@ -87,6 +87,7 @@ class RagAnswerRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=10)
     peer_reviewed_only: bool = False
     conversation_id: Optional[int] = None
+    relevant_document_ids: Optional[List[int]] = None
 
 
 class RagSource(BaseModel):
@@ -103,6 +104,7 @@ class RagAnswerResponse(BaseModel):
     answer: str
     sources: List[RagSource]
     conversation_id: Optional[int] = None
+    precision_at_k: Optional[float] = None
 
 class ChatMessageItem(BaseModel):
     id: int
